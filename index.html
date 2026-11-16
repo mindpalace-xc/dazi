@@ -332,7 +332,7 @@ window.addEventListener("orientationchange",function(){setTimeout(fit,300)});
 /* ---------------- 语音识别 ---------------- */
 var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 var standalone=!!(navigator.standalone||(window.matchMedia&&matchMedia("(display-mode: standalone)").matches));
-var rec=null,listening=false,gotFinal=false,lastInterim="";
+var rec=null,listening=false,heard="",done=true,silTimer=null,maxTimer=null,lastErr="",events=0;
 var mic=$("mic"),micText=$("micText");
 function setListening(on){listening=on;mic.classList.toggle("listening",on);micText.textContent=on?"正在听…说完点这里":"点一下，说话"}
 function keepAwake(){try{if(navigator.wakeLock)navigator.wakeLock.request("screen").catch(function(){})}catch(e){}}
@@ -341,37 +341,46 @@ function finish(raw){
   show(lastShown,{raw:lastShown!==raw?raw:""});
   wrongBtn.hidden=false;
 }
+function clearTimers(){clearTimeout(silTimer);clearTimeout(maxTimer);silTimer=maxTimer=null}
+// 一句话结束：停顿 1.5 秒，或者点按钮
+function endNow(){
+  if(done)return;done=true;clearTimers();setListening(false);
+  try{rec.stop()}catch(e){}
+  if(heard)finish(heard);
+  else{hint("没听清，<br>请再说一次");rawEl.textContent="代码："+(lastErr||"没有结果")+" · "+events}
+}
+// 把识别结果拼成一句（iPhone 有时会把前面的话重复带上，这里去掉重复）
+function joinResults(results){
+  var parts=[];for(var i=0;i<results.length;i++)parts.push((results[i][0]&&results[i][0].transcript)||"");
+  var last=parts[parts.length-1]||"",before=parts.slice(0,-1).join("");
+  if(before&&last.replace(/\s/g,"").indexOf(before.replace(/\s/g,""))===0)return last.trim();
+  return parts.join("").trim();
+}
 function start(){
   if(!SR){hint("这个浏览器不能听写。<br>请用 iPhone 的 Safari 打开");return}
-  rec=new SR();rec.lang="zh-CN";rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=5;
-  gotFinal=false;lastInterim="";
+  rec=new SR();rec.lang="zh-CN";rec.interimResults=true;rec.continuous=true;
+  heard="";done=false;lastErr="";events=0;
   rec.onresult=function(e){
-    var res=e.results[e.results.length-1];
-    if(res.isFinal){
-      var alts=[];for(var i=0;i<res.length;i++)if(res[i].transcript)alts.push(res[i].transcript.trim());
-      var all="";for(var j=0;j<e.results.length-1;j++)all+=e.results[j][0].transcript;
-      gotFinal=true;finish((all+pickAlt(alts)).trim());
-    }else{
-      var t="";for(var k=0;k<e.results.length;k++)t+=e.results[k][0].transcript;
-      lastInterim=t.trim();if(lastInterim)show(lastInterim,{interim:true});
-    }
+    events++;
+    var t=joinResults(e.results);
+    if(t){heard=t;show(t,{interim:true})}
+    clearTimeout(silTimer);silTimer=setTimeout(endNow,1500);
   };
   rec.onerror=function(e){
-    setListening(false);
-    if(e.error==="not-allowed"||e.error==="service-not-allowed")
-      hint(standalone?"从桌面图标打开时，<br>手机不让用麦克风。<br>请告诉做 App 的人":"没有麦克风权限。<br>请看「设置」里的说明");
-    else if(e.error==="no-speech")hint("没听到声音，<br>请再点一次说话");
-    else if(e.error!=="aborted")hint("没听清，<br>请再说一次");
+    lastErr=e.error||"error";
+    if(lastErr==="not-allowed"||lastErr==="service-not-allowed"){
+      done=true;clearTimers();setListening(false);
+      hint(standalone?"从桌面图标打开时，<br>手机不让用麦克风。<br>请改用 Safari 打开":"没有麦克风权限。<br>请看「设置」里的说明");
+      rawEl.textContent="代码："+lastErr;
+    }
   };
-  rec.onend=function(){
-    setListening(false);
-    if(!gotFinal&&lastInterim)finish(lastInterim);
-    else if(!gotFinal&&!lastInterim&&words.classList.contains("interim"))hint("没听清，<br>请再说一次");
-  };
-  try{rec.start();setListening(true);wrongBtn.hidden=true;show("请说……",{interim:true});keepAwake()}
-  catch(err){setListening(false);hint("没能开始听，<br>请再点一次")}
+  rec.onend=function(){endNow()};
+  try{
+    rec.start();setListening(true);wrongBtn.hidden=true;show("请说……",{interim:true});keepAwake();
+    maxTimer=setTimeout(function(){if(!heard)endNow()},10000);
+  }catch(err){done=true;setListening(false);hint("没能开始听，<br>请再点一次");rawEl.textContent="代码："+(err&&err.name||"start")}
 }
-mic.addEventListener("click",function(){if(listening){try{rec.stop()}catch(e){}}else start()});
+mic.addEventListener("click",function(){if(listening)endNow();else start()});
 
 /* ---------------- 听错了 ---------------- */
 var fixEl=$("fix");
