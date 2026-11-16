@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>大字说话</title>
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="大字说话">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff">
+<style>
+  /* 布局：全屏大字区 + 底部一个大按钮；横屏时按钮移到右边一列 */
+  :root{
+    --bg:#ffffff; --ink:#111111; --muted:#6b6f76; --line:#e3e5e8;
+    --soft:#f3f5f7; --go:#1b6fd8; --go-ink:#ffffff; --stop:#d23a2a; --ok:#1f8a4c;
+    --font:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font);
+    padding:env(safe-area-inset-top,0) max(12px,env(safe-area-inset-right,0)) env(safe-area-inset-bottom,0) max(12px,env(safe-area-inset-left,0));
+    overflow:hidden;-webkit-user-select:none;user-select:none}
+  button{font-family:inherit;cursor:pointer}
+  .page{display:none;height:100%;flex-direction:column}
+  .page.on{display:flex}
+
+  .top{display:flex;gap:8px;align-items:center;padding:8px 0;flex:none}
+  .top .sp{flex:1}
+  .chip{border:1px solid var(--line);background:var(--soft);color:var(--ink);
+    font-size:17px;padding:9px 14px;border-radius:999px}
+  .title{font-size:22px;font-weight:700}
+
+  #stage{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+  #words{flex:1;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
+    text-align:center;font-weight:700;line-height:1.25;word-break:break-all;text-wrap:balance;padding:4px;transition:opacity .4s}
+  #words span{text-wrap:balance}
+  #words .cl{display:inline-block;max-width:100%;word-break:break-all}
+  #words.interim{color:var(--muted)}
+  #words.hint{color:var(--muted);font-weight:500}
+  #raw{flex:none;text-align:center;color:var(--muted);font-size:15px;min-height:22px;padding:2px 4px}
+  #bar{flex:none;height:4px;background:var(--soft);border-radius:2px;overflow:hidden;margin:4px 0}
+  #bar i{display:block;height:100%;width:0;background:var(--line)}
+
+  .bottom{flex:none;display:flex;gap:10px;padding:8px 0 12px}
+  #mic{flex:1;border:0;border-radius:22px;background:var(--go);color:var(--go-ink);
+    font-size:26px;font-weight:700;padding:22px 10px;display:flex;align-items:center;justify-content:center;gap:10px}
+  #mic.listening{background:var(--stop)}
+  #mic svg{width:30px;height:30px;flex:none}
+  #wrong{flex:none;border:1px solid var(--line);background:var(--soft);color:var(--ink);
+    border-radius:22px;font-size:18px;padding:0 16px;font-weight:600}
+  #wrong[hidden]{display:none}
+
+  .scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:24px;-webkit-user-select:text;user-select:text}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .card{position:relative;border:1px solid var(--line);background:var(--soft);border-radius:16px;
+    font-size:21px;font-weight:600;padding:18px 12px;text-align:center;color:var(--ink);min-height:72px}
+  .card .x{position:absolute;top:-8px;right:-8px;width:30px;height:30px;border-radius:50%;
+    border:0;background:var(--stop);color:#fff;font-size:18px;line-height:30px;padding:0}
+  .row{display:flex;gap:8px;margin:12px 0}
+  .row[hidden]{display:none}
+  .row input{flex:1;min-width:0;font-size:19px;padding:12px;border:1px solid var(--line);border-radius:12px;font-family:inherit}
+  .btn{border:0;border-radius:12px;background:var(--go);color:#fff;font-size:18px;font-weight:600;padding:12px 16px}
+  .btn.ghost{background:var(--soft);color:var(--ink);border:1px solid var(--line)}
+  h2{font-size:20px;margin:18px 0 8px}
+  p.note{color:var(--muted);font-size:16px;line-height:1.6;margin:6px 0}
+  .rule{display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding:12px 2px;font-size:19px}
+  .rule .a{color:var(--stop);text-decoration:line-through}
+  .rule .b{color:var(--ok);font-weight:600}
+  .rule .sp{flex:1}
+  .rule button{border:0;background:none;color:var(--muted);font-size:16px}
+  .opt{display:flex;flex-wrap:wrap;gap:8px}
+  .opt button{border:1px solid var(--line);background:var(--soft);font-size:18px;padding:10px 16px;border-radius:12px;color:var(--ink)}
+  .opt button.sel{background:var(--go);color:#fff;border-color:var(--go)}
+  ol.steps{font-size:17px;line-height:1.7;padding-left:22px;margin:6px 0}
+
+  #fix{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-end;z-index:9}
+  #fix.on{display:flex}
+  #fix .sheet{background:var(--bg);width:100%;max-height:88%;overflow-y:auto;border-radius:20px 20px 0 0;
+    padding:16px max(16px,env(safe-area-inset-right,0)) calc(16px + env(safe-area-inset-bottom,0)) max(16px,env(safe-area-inset-left,0))}
+  #fix .heard{font-size:17px;color:var(--muted);margin-bottom:8px}
+  #fix .heard b{color:var(--ink)}
+  .sugg{display:flex;flex-direction:column;gap:8px}
+  .sugg button{text-align:left;border:1px solid var(--line);background:var(--soft);border-radius:14px;
+    font-size:21px;padding:14px;color:var(--ink);font-weight:600}
+  .toast{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0));transform:translateX(-50%);
+    background:#222;color:#fff;font-size:17px;padding:10px 18px;border-radius:999px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:10}
+  .toast.on{opacity:1}
+
+  /* 横屏：左边大字，右边一列按钮 */
+  @media (orientation:landscape) and (max-height:560px){
+    #p-main.on{display:grid;grid-template-columns:1fr 168px;grid-template-rows:auto 1fr;column-gap:12px}
+    #p-main .top{grid-column:2;grid-row:1;flex-wrap:wrap;gap:6px;padding:8px 0 0}
+    #p-main .top .sp{display:none}
+    #p-main .top .chip{flex:1 1 70px;font-size:15px;padding:7px 8px;text-align:center}
+    #stage{grid-column:1;grid-row:1/3;min-width:0}
+    #p-main .bottom{grid-column:2;grid-row:2;flex-direction:column-reverse;padding:8px 0}
+    #mic{flex:1;flex-direction:column;font-size:22px;padding:10px 6px}
+    #mic svg{width:40px;height:40px}
+    #wrong{padding:14px 8px}
+    .toast{bottom:calc(24px + env(safe-area-inset-bottom,0))}
+  }
+  @media (prefers-reduced-motion:reduce){#words,.toast{transition:none}}
+</style>
+</head>
+<body>
+
+<section class="page on" id="p-main">
+  <div class="top">
+    <button class="chip" data-go="p-phr">常用语</button>
+    <button class="chip" data-go="p-rules">纠错本</button>
+    <span class="sp"></span>
+    <button class="chip" data-go="p-set">设置</button>
+  </div>
+  <div id="stage">
+    <div id="words" class="hint">点蓝色按钮，<br>开始说话</div>
+    <div id="raw"></div>
+    <div id="bar"><i></i></div>
+  </div>
+  <div class="bottom">
+    <button id="wrong" hidden>听错了</button>
+    <button id="mic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span id="micText">点一下，说话</span></button>
+  </div>
+</section>
+
+<section class="page" id="p-phr">
+  <div class="top"><button class="chip" data-go="p-main">‹ 返回</button><span class="title">常用语</span><span class="sp"></span><button class="chip" id="phrEdit">编辑</button></div>
+  <div class="scroll">
+    <p class="note">点一下，马上大字显示。你常说的话放在这里，App 也会用它们来纠正听错的话。</p>
+    <div class="row" id="phrAddRow" hidden><input id="phrIn" placeholder="输入一句常说的话"><button class="btn" id="phrAdd">添加</button></div>
+    <div class="grid" id="phrGrid"></div>
+  </div>
+</section>
+
+<section class="page" id="p-rules">
+  <div class="top"><button class="chip" data-go="p-main">‹ 返回</button><span class="title">纠错本</span></div>
+  <div class="scroll">
+    <p class="note">App 听错过、又被你纠正过的词都记在这里，下次自动改对。一般不用管它，点"听错了"时会自动记。</p>
+    <div class="row"><input id="rFrom" placeholder="听错成"><input id="rTo" placeholder="应该是"><button class="btn" id="rAdd">记下</button></div>
+    <div id="ruleList"></div>
+  </div>
+</section>
+
+<section class="page" id="p-set">
+  <div class="top"><button class="chip" data-go="p-main">‹ 返回</button><span class="title">设置</span></div>
+  <div class="scroll">
+    <h2>字多久后自动消失</h2>
+    <div class="opt" id="optClear"></div>
+    <p class="note">不管选哪个，点一下大字也能马上清空。</p>
+    <h2>自动纠错</h2>
+    <div class="opt" id="optFix"></div>
+    <p class="note">按读音和医院常用词、你的常用语比对，自动改正听错的字。</p>
+    <h2>显示原话小字</h2>
+    <div class="opt" id="optRaw"></div>
+    <p class="note">纠错时，大字下面用灰色小字显示机器原本听到的话，方便你核对。</p>
+    <h2>第一次用，iPhone 要打开的设置</h2>
+    <ol class="steps">
+      <li>打开 iPhone 的 <b>设置 → 通用 → 键盘</b>，打开 <b>启用听写</b>。</li>
+      <li>用 <b>Safari 浏览器</b>打开这个网页（不要在微信里打开）。</li>
+      <li>第一次点"说话"时，手机会问能不能用麦克风，点 <b>允许</b>。</li>
+      <li>放到桌面：点 Safari 下方的 <b>分享按钮</b>（方框加向上箭头）→ <b>添加到主屏幕</b>。以后点桌面上的"大字说话"图标就能直接用。</li>
+    </ol>
+    <h2>清空所有学习记录</h2>
+    <button class="btn ghost" id="resetAll">恢复成刚安装的样子</button>
+    <p class="note" id="resetMsg"></p>
+    <p class="note">你说的话只在这台手机上处理，这个网页不会保存或上传。</p>
+  </div>
+</section>
+
+<div id="fix">
+  <div class="sheet">
+    <div class="heard">机器听到：<b id="fixHeard"></b></div>
+    <h2 style="margin-top:6px">你说的是哪一句？点一下</h2>
+    <div class="sugg" id="fixList"></div>
+    <h2>都不对？自己改</h2>
+    <div class="row"><input id="fixIn"><button class="btn" id="fixOk">好了</button></div>
+    <button class="btn ghost" id="fixCancel" style="width:100%">取消</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="pinyin-pro.js"></script>
+<script>
+(function(){
+"use strict";
+/* ---------------- 默认数据 ---------------- */
+var DEFAULT_PHRASES = [
+  "你要去留个尿","你要去厕所留个尿样","要抽血了，别怕","现在量一下血压","要测一下血糖",
+  "该吃药了","这个药饭后吃","这个药饭前吃","现在不能吃东西，要空腹","可以喝点水",
+  "你哪里疼？","疼得厉害吗？","你想上厕所吗？","今天大便了吗？","你头晕吗？",
+  "要打针了","要输液了，手别乱动","要去拍片子","要去做CT","要做心电图",
+  "医生马上就来","家属马上就到","你要躺下休息","慢慢坐起来","深呼吸",
+  "张开嘴","你冷不冷？","你饿不饿？","明天可以出院了","有不舒服就按铃"
+];
+var MED_TERMS = ("留个尿 留尿 尿样 验尿 尿检 小便 大便 便秘 拉肚子 上厕所 尿壶 便盆 尿袋 导尿管 "+
+  "抽血 验血 血常规 量血压 血压 高血压 低血压 血糖 测血糖 低血糖 胰岛素 血氧 心率 心跳 体温 量体温 发烧 退烧 "+
+  "打针 输液 吊瓶 挂水 留置针 针眼 吃药 降压药 止疼药 止痛药 消炎药 安眠药 阿司匹林 抗生素 青霉素 过敏 "+
+  "拍片 拍片子 做CT 核磁共振 心电图 B超 彩超 胃镜 肠镜 化验 化验单 检查 复查 "+
+  "空腹 禁食 禁水 喝水 饭前 饭后 睡前 一天三次 一天两次 一次一片 一次两片 "+
+  "头晕 头疼 恶心 呕吐 咳嗽 有痰 吐痰 胸闷 气短 喘不上气 呼吸 深呼吸 憋气 心慌 肚子疼 "+
+  "伤口 换药 拆线 手术 麻醉 住院 出院 挂号 缴费 医生 护士 主任 病房 床位 轮椅 拐杖 翻身 吸氧 氧气 雾化 "+
+  "家属 签字 躺下 坐起来 站起来 张嘴 伸舌头 放松 抬手 握拳 侧身 按铃 透析 康复 理疗 假牙 助听器 老花镜").split(" ");
+var DEFAULT_RULES = [{from:"六姑娘",to:"留个尿"},{from:"留个念",to:"留个尿"},{from:"刘姑娘",to:"留个尿"}];
+
+/* ---------------- 存储（出错也能用） ---------------- */
+function load(k,d){try{var v=localStorage.getItem("dazi."+k);return v?JSON.parse(v):d}catch(e){return d}}
+function save(k,v){try{localStorage.setItem("dazi."+k,JSON.stringify(v))}catch(e){}}
+var phrases = load("phrases", DEFAULT_PHRASES.slice());
+var rules = load("rules", DEFAULT_RULES.slice());
+var settings = load("settings", {clear:20, fix:true, raw:true});
+
+/* ---------------- 拼音比对 ---------------- */
+var PP = window.pinyinPro;
+var isHan = function(c){return /[㐀-鿿]/.test(c)};
+function py(text){
+  if(!PP) return Array.from(text);
+  return PP.pinyin(text,{toneType:"none",type:"array",nonZh:"consecutive"}).map(function(s){return s.toLowerCase()});
+}
+var INITS=["zh","ch","sh","b","p","m","f","d","t","n","l","g","k","h","j","q","x","r","z","c","s","y","w"];
+function split(s){for(var i=0;i<INITS.length;i++){if(s.indexOf(INITS[i])===0)return[INITS[i],s.slice(INITS[i].length)]}return["",s]}
+var FI={zh:"z",ch:"c",sh:"s",l:"n",f:"h"}, FF={ang:"an",eng:"en",ing:"in",iang:"ian",uang:"uan",ong:"on"};
+function lev(a,b){var m=a.length,n=b.length;if(!m)return n;if(!n)return m;var p=[],i,j;for(j=0;j<=n;j++)p[j]=j;
+  for(i=1;i<=m;i++){var prev=p[0];p[0]=i;for(j=1;j<=n;j++){var t=p[j];p[j]=Math.min(p[j]+1,p[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));prev=t}}return p[n]}
+function sylSim(a,b){
+  if(a===b)return 1;
+  var A=split(a),B=split(b);
+  var ia=FI[A[0]]||A[0], ib=FI[B[0]]||B[0], fa=FF[A[1]]||A[1], fb=FF[B[1]]||B[1];
+  if(ia===ib&&fa===fb)return .85;
+  if(ia===ib)return .4+.4*(1-lev(fa,fb)/Math.max(fa.length,fb.length,1));
+  if(fa===fb)return .55;
+  return .5*(1-lev(a,b)/Math.max(a.length,b.length));
+}
+function seqSim(x,y){
+  var m=x.length,n=y.length;if(!m||!n)return 0;
+  var D=[],i,j;for(i=0;i<=m;i++){D[i]=[];for(j=0;j<=n;j++)D[i][j]=i===0?j*.9:(j===0?i*.9:0)}
+  for(i=1;i<=m;i++)for(j=1;j<=n;j++)D[i][j]=Math.min(D[i-1][j]+.9,D[i][j-1]+.9,D[i-1][j-1]+(1-sylSim(x[i-1],y[j-1])));
+  return 1-D[m][n]/Math.max(m,n);
+}
+var strip=function(s){return s.replace(/[\s，。！？、,.!?；;：:“”"'‘’…·]/g,"")};
+var pyCache={};function pyOf(s){return pyCache[s]||(pyCache[s]=py(strip(s)))}
+
+function applyRules(t){
+  var rs=rules.slice().sort(function(a,b){return b.from.length-a.from.length});
+  rs.forEach(function(r){if(r.from&&t.indexOf(r.from)>=0)t=t.split(r.from).join(r.to)});
+  return t;
+}
+function rankPhrases(t){
+  var p=pyOf(t);
+  return phrases.map(function(ph){return{text:ph,score:seqSim(p,pyOf(ph))}})
+    .sort(function(a,b){return b.score-a.score});
+}
+function fixTerms(t){
+  var chars=Array.from(t), pys=PP?PP.pinyin(t,{toneType:"none",type:"array"}):chars;
+  var terms=MED_TERMS.concat(rules.map(function(r){return r.to}));
+  var cands=[];
+  terms.forEach(function(term){
+    var tp=pyOf(term),L=tp.length;if(L<2)return;
+    var lens=L>=3?[L-1,L,L+1]:[L];
+    lens.forEach(function(w){
+      for(var s=0;s+w<=chars.length;s++){
+        var seg=chars.slice(s,s+w);if(!seg.every(isHan))continue;
+        if(seg.join("")===term)continue;
+        var sc=seqSim(pys.slice(s,s+w),tp);
+        if(sc>=(L===2?.92:.8))cands.push({s:s,e:s+w,to:term,sc:sc});
+      }
+    });
+  });
+  var keep=[];terms.forEach(function(term){var i=t.indexOf(term);while(i>=0){var s=Array.from(t.slice(0,i)).length;keep.push([s,s+Array.from(term).length]);i=t.indexOf(term,i+1)}});
+  cands=cands.filter(function(c){return !keep.some(function(k){return c.s<k[1]&&k[0]<c.e})});
+  cands.sort(function(a,b){return b.sc-a.sc||(b.e-b.s)-(a.e-a.s)});
+  var used=[];
+  cands.forEach(function(c){if(!used.some(function(u){return c.s<u.e&&u.s<c.e}))used.push(c)});
+  used.sort(function(a,b){return b.s-a.s}).forEach(function(c){chars.splice(c.s,c.e-c.s,c.to)});
+  return chars.join("");
+}
+function correct(raw){
+  var t=applyRules(raw);
+  if(!settings.fix)return t;
+  var best=rankPhrases(t)[0];
+  if(best&&best.score>=.78)return best.text;
+  return fixTerms(t);
+}
+function pickAlt(alts){
+  if(alts.length<2||!settings.fix)return alts[0];
+  var best=alts[0],bs=-1;
+  alts.forEach(function(a,i){var r=rankPhrases(applyRules(a))[0];var sc=(r?r.score:0)-i*.02;if(sc>bs){bs=sc;best=a}});
+  return best;
+}
+
+/* ---------------- 显示 ---------------- */
+var $=function(id){return document.getElementById(id)};
+var words=$("words"),rawEl=$("raw"),barI=$("bar").firstElementChild,wrongBtn=$("wrong");
+var clearTimer=null,lastRaw="",lastShown="";
+// 整句放进一屏：字尽量大，但每行至少 4 个字
+function fit(){
+  var box=words, lo=16;
+  var n=Array.from((box.textContent||"").replace(/\s/g,"")).length||1;
+  var hi=Math.max(lo+1,Math.min(320,box.clientWidth/Math.min(4,n)));
+  for(var k=0;k<14;k++){var mid=(lo+hi)/2;box.style.fontSize=mid+"px";
+    if(box.scrollHeight<=box.clientHeight+1&&box.scrollWidth<=box.clientWidth+1)lo=mid;else hi=mid}
+  box.style.fontSize=Math.floor(lo)+"px";
+}
+function show(text,opts){
+  opts=opts||{};
+  words.className=opts.interim?"interim":"";
+  words.style.opacity=1;
+  words.innerHTML="";var s=document.createElement("span");
+  // 按逗号句号分成小段，换行优先在标点处
+  (text.match(/[^，。！？、,.!?；;]+[，。！？、,.!?；;]*|[，。！？、,.!?；;]+/g)||[text]).forEach(function(part){
+    var c=document.createElement("span");c.className="cl";c.textContent=part;s.appendChild(c)});
+  words.appendChild(s);
+  rawEl.textContent=opts.raw&&settings.raw?("原话："+opts.raw):"";
+  fit();
+  stopClear();
+  if(!opts.interim)startClear();
+}
+function hint(html){words.className="hint";words.style.opacity=1;words.innerHTML=html;rawEl.textContent="";fit();stopClear();wrongBtn.hidden=true}
+function stopClear(){if(clearTimer){clearInterval(clearTimer);clearTimer=null}barI.style.width="0"}
+function startClear(){
+  var sec=settings.clear;if(!sec)return;
+  var t0=Date.now();barI.style.width="100%";
+  clearTimer=setInterval(function(){var left=1-(Date.now()-t0)/(sec*1000);
+    barI.style.width=Math.max(0,left*100)+"%";if(left<=0){stopClear();blank()}},200);
+}
+function blank(){words.style.opacity=0;setTimeout(function(){hint("点蓝色按钮，<br>开始说话")},400)}
+words.addEventListener("click",function(){if(!words.classList.contains("hint")&&!listening)blank()});
+window.addEventListener("resize",fit);
+window.addEventListener("orientationchange",function(){setTimeout(fit,300)});
+
+/* ---------------- 语音识别 ---------------- */
+var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+var standalone=!!(navigator.standalone||(window.matchMedia&&matchMedia("(display-mode: standalone)").matches));
+var rec=null,listening=false,gotFinal=false,lastInterim="";
+var mic=$("mic"),micText=$("micText");
+function setListening(on){listening=on;mic.classList.toggle("listening",on);micText.textContent=on?"正在听…说完点这里":"点一下，说话"}
+function keepAwake(){try{if(navigator.wakeLock)navigator.wakeLock.request("screen").catch(function(){})}catch(e){}}
+function finish(raw){
+  lastRaw=raw;lastShown=correct(raw);
+  show(lastShown,{raw:lastShown!==raw?raw:""});
+  wrongBtn.hidden=false;
+}
+function start(){
+  if(!SR){hint("这个浏览器不能听写。<br>请用 iPhone 的 Safari 打开");return}
+  rec=new SR();rec.lang="zh-CN";rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=5;
+  gotFinal=false;lastInterim="";
+  rec.onresult=function(e){
+    var res=e.results[e.results.length-1];
+    if(res.isFinal){
+      var alts=[];for(var i=0;i<res.length;i++)if(res[i].transcript)alts.push(res[i].transcript.trim());
+      var all="";for(var j=0;j<e.results.length-1;j++)all+=e.results[j][0].transcript;
+      gotFinal=true;finish((all+pickAlt(alts)).trim());
+    }else{
+      var t="";for(var k=0;k<e.results.length;k++)t+=e.results[k][0].transcript;
+      lastInterim=t.trim();if(lastInterim)show(lastInterim,{interim:true});
+    }
+  };
+  rec.onerror=function(e){
+    setListening(false);
+    if(e.error==="not-allowed"||e.error==="service-not-allowed")
+      hint(standalone?"从桌面图标打开时，<br>手机不让用麦克风。<br>请告诉做 App 的人":"没有麦克风权限。<br>请看「设置」里的说明");
+    else if(e.error==="no-speech")hint("没听到声音，<br>请再点一次说话");
+    else if(e.error!=="aborted")hint("没听清，<br>请再说一次");
+  };
+  rec.onend=function(){
+    setListening(false);
+    if(!gotFinal&&lastInterim)finish(lastInterim);
+    else if(!gotFinal&&!lastInterim&&words.classList.contains("interim"))hint("没听清，<br>请再说一次");
+  };
+  try{rec.start();setListening(true);wrongBtn.hidden=true;show("请说……",{interim:true});keepAwake()}
+  catch(err){setListening(false);hint("没能开始听，<br>请再点一次")}
+}
+mic.addEventListener("click",function(){if(listening){try{rec.stop()}catch(e){}}else start()});
+
+/* ---------------- 听错了 ---------------- */
+var fixEl=$("fix");
+function toast(msg){var t=$("toast");t.textContent=msg;t.classList.add("on");setTimeout(function(){t.classList.remove("on")},1800)}
+function learn(raw,right){
+  var a=strip(raw),b=strip(right);if(!a||!b||a===b)return;
+  // 只记差别的那一段，例如 “我要去六姑娘”→“我要去留个尿” 记成 “六姑娘→留个尿”
+  var A=Array.from(a),B=Array.from(b),p=0;while(p<A.length&&p<B.length&&A[p]===B[p])p++;
+  var q=0;while(q<A.length-p&&q<B.length-p&&A[A.length-1-q]===B[B.length-1-q])q++;
+  var from=A.slice(p,A.length-q).join(""),to=B.slice(p,B.length-q).join("");
+  if(from.length<2||!to){from=a;to=b}
+  rules=rules.filter(function(r){return r.from!==from});rules.push({from:from,to:to});save("rules",rules);
+}
+function useFix(right,isNew){
+  learn(lastRaw,right);
+  if(isNew&&phrases.indexOf(right)<0){phrases.unshift(right);save("phrases",phrases);pyCache={}}
+  fixEl.classList.remove("on");lastShown=right;show(right,{raw:lastRaw});toast("记住了，下次会改对");
+}
+wrongBtn.addEventListener("click",function(){
+  stopClear();
+  $("fixHeard").textContent=lastRaw;
+  var list=$("fixList");list.innerHTML="";
+  rankPhrases(applyRules(lastRaw)).slice(0,5).forEach(function(r){
+    var b=document.createElement("button");b.textContent=r.text;b.onclick=function(){useFix(r.text,false)};list.appendChild(b);
+  });
+  $("fixIn").value=lastShown;fixEl.classList.add("on");
+});
+$("fixOk").onclick=function(){var v=$("fixIn").value.trim();if(v)useFix(v,true)};
+$("fixCancel").onclick=function(){fixEl.classList.remove("on");startClear()};
+
+/* ---------------- 页面切换 ---------------- */
+Array.prototype.forEach.call(document.querySelectorAll("[data-go]"),function(b){b.addEventListener("click",function(){go(b.getAttribute("data-go"))})});
+function go(id){Array.prototype.forEach.call(document.querySelectorAll(".page"),function(p){p.classList.toggle("on",p.id===id)});
+  if(id==="p-phr")drawPhr();if(id==="p-rules")drawRules();if(id==="p-set")drawSet();if(id==="p-main")fit()}
+
+var editing=false;
+function drawPhr(){
+  var g=$("phrGrid");g.innerHTML="";$("phrAddRow").hidden=!editing;$("phrEdit").textContent=editing?"完成":"编辑";
+  phrases.forEach(function(ph,i){
+    var c=document.createElement("button");c.className="card";c.textContent=ph;
+    c.onclick=function(){if(editing)return;go("p-main");lastRaw=ph;lastShown=ph;show(ph);wrongBtn.hidden=true};
+    if(editing){var x=document.createElement("button");x.className="x";x.textContent="×";
+      x.onclick=function(ev){ev.stopPropagation();phrases.splice(i,1);save("phrases",phrases);drawPhr()};c.appendChild(x)}
+    g.appendChild(c);
+  });
+}
+$("phrEdit").onclick=function(){editing=!editing;drawPhr()};
+$("phrAdd").onclick=function(){var v=$("phrIn").value.trim();if(!v)return;phrases.unshift(v);save("phrases",phrases);$("phrIn").value="";drawPhr()};
+
+function drawRules(){
+  var l=$("ruleList");l.innerHTML="";
+  if(!rules.length){l.innerHTML='<p class="note">还没有记录。</p>';return}
+  rules.slice().reverse().forEach(function(r){
+    var d=document.createElement("div");d.className="rule";
+    d.innerHTML='<span class="a"></span><span>→</span><span class="b"></span><span class="sp"></span><button>删除</button>';
+    d.children[0].textContent=r.from;d.children[2].textContent=r.to;
+    d.children[4].onclick=function(){rules=rules.filter(function(x){return x!==r});save("rules",rules);drawRules()};
+    l.appendChild(d);
+  });
+}
+$("rAdd").onclick=function(){var a=$("rFrom").value.trim(),b=$("rTo").value.trim();if(!a||!b)return;
+  rules=rules.filter(function(r){return r.from!==a});rules.push({from:a,to:b});save("rules",rules);$("rFrom").value="";$("rTo").value="";drawRules()};
+
+function opts(el,items,key){
+  el.innerHTML="";items.forEach(function(it){var b=document.createElement("button");b.textContent=it[0];
+    if(settings[key]===it[1])b.className="sel";b.onclick=function(){settings[key]=it[1];save("settings",settings);drawSet()};el.appendChild(b)});
+}
+function drawSet(){
+  opts($("optClear"),[["10秒",10],["20秒",20],["30秒",30],["1分钟",60],["不自动消失",0]],"clear");
+  opts($("optFix"),[["打开",true],["关闭",false]],"fix");
+  opts($("optRaw"),[["显示",true],["不显示",false]],"raw");
+}
+var resetArmed=false;
+$("resetAll").onclick=function(){
+  if(!resetArmed){resetArmed=true;$("resetMsg").textContent="再点一次确认。常用语和纠错本会恢复成最初的样子。";return}
+  phrases=DEFAULT_PHRASES.slice();rules=DEFAULT_RULES.slice();settings={clear:20,fix:true,raw:true};
+  save("phrases",phrases);save("rules",rules);save("settings",settings);pyCache={};resetArmed=false;
+  $("resetMsg").textContent="已恢复。";drawSet();
+};
+
+if(!SR)hint("这个浏览器不能听写。<br>请用 iPhone 的 Safari 打开");else fit();
+window.__dazi={correct:correct,show:show};
+})();
+</script>
+</body>
+</html>
