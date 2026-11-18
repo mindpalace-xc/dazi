@@ -146,6 +146,9 @@
 <section class="page" id="p-set">
   <div class="top"><button class="chip" data-go="p-main">‹ 返回</button><span class="title">设置</span></div>
   <div class="scroll">
+    <h2>说完一句后</h2>
+    <div class="opt" id="optAuto"></div>
+    <p class="note">"自动接着听"：点一次按钮就一直听，说一句显示一句，点红色按钮停止。一分钟没人说话会自己停。</p>
     <h2>字多久后自动消失</h2>
     <div class="opt" id="optClear"></div>
     <p class="note">不管选哪个，点一下大字也能马上清空。</p>
@@ -209,7 +212,8 @@ function load(k,d){try{var v=localStorage.getItem("dazi."+k);return v?JSON.parse
 function save(k,v){try{localStorage.setItem("dazi."+k,JSON.stringify(v))}catch(e){}}
 var phrases = load("phrases", DEFAULT_PHRASES.slice());
 var rules = load("rules", DEFAULT_RULES.slice());
-var settings = load("settings", {clear:20, fix:true, raw:true});
+var settings = load("settings", {clear:20, fix:true, raw:true, auto:true});
+if(settings.auto===undefined)settings.auto=true;
 
 /* ---------------- 拼音比对 ---------------- */
 var PP = window.pinyinPro;
@@ -325,7 +329,7 @@ function startClear(){
     barI.style.width=Math.max(0,left*100)+"%";if(left<=0){stopClear();blank()}},200);
 }
 function blank(){words.style.opacity=0;setTimeout(function(){hint("点蓝色按钮，<br>开始说话")},400)}
-words.addEventListener("click",function(){if(!words.classList.contains("hint")&&!listening)blank()});
+words.addEventListener("click",function(){if(!words.classList.contains("hint")&&!words.classList.contains("interim"))blank()});
 window.addEventListener("resize",fit);
 window.addEventListener("orientationchange",function(){setTimeout(fit,300)});
 
@@ -333,8 +337,10 @@ window.addEventListener("orientationchange",function(){setTimeout(fit,300)});
 var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 var standalone=!!(navigator.standalone||(window.matchMedia&&matchMedia("(display-mode: standalone)").matches));
 var rec=null,listening=false,heard="",done=true,silTimer=null,maxTimer=null,lastErr="",events=0;
+var autoOn=false,idleSince=0,restartTimer=null;
 var mic=$("mic"),micText=$("micText");
-function setListening(on){listening=on;mic.classList.toggle("listening",on);micText.textContent=on?"正在听…说完点这里":"点一下，说话"}
+function setListening(on){listening=on;var red=on||autoOn;mic.classList.toggle("listening",red);
+  micText.textContent=red?(settings.auto?"正在听…点这里停":"正在听…说完点这里"):"点一下，说话"}
 function keepAwake(){try{if(navigator.wakeLock)navigator.wakeLock.request("screen").catch(function(){})}catch(e){}}
 function finish(raw){
   lastRaw=raw;lastShown=correct(raw);
@@ -342,18 +348,30 @@ function finish(raw){
   wrongBtn.hidden=false;
 }
 function clearTimers(){clearTimeout(silTimer);clearTimeout(maxTimer);silTimer=maxTimer=null}
-// 一句话结束：停顿 1.5 秒，或者点按钮
-function endNow(){
-  if(done)return;done=true;clearTimers();setListening(false);
-  killRec();
-  if(heard)finish(heard);
-  else{hint("没听清，<br>请再说一次");rawEl.textContent="代码："+(lastErr||"没有结果")+" · "+events}
-}
 // 彻底关掉上一次听写，并且不再理会它迟到的通知
 function killRec(){
   var r=rec;rec=null;if(!r)return;
   r.onresult=r.onerror=r.onend=r.onstart=null;
   try{r.abort()}catch(e){try{r.stop()}catch(e2){}}
+}
+// 一句话结束：停顿 1.5 秒，或者点按钮
+function endNow(){
+  if(done)return;done=true;clearTimers();killRec();
+  if(heard){finish(heard);idleSince=Date.now()}
+  if(autoOn){
+    if(!heard&&Date.now()-idleSince>60000){stopAll();hint("一分钟没人说话，<br>已停止听。<br>点按钮继续");return}
+    setListening(false);
+    restartTimer=setTimeout(function(){if(autoOn)start(false,true)},500);
+    return;
+  }
+  setListening(false);
+  if(!heard){hint("没听清，<br>请再说一次");rawEl.textContent="代码："+(lastErr||"没有结果")+" · "+events}
+}
+function stopAll(){
+  autoOn=false;clearTimeout(restartTimer);
+  var h=done?"":heard;done=true;clearTimers();killRec();setListening(false);
+  if(h)finish(h);
+  else if(words.classList.contains("interim")&&!words.textContent.replace("请说……",""))hint("点蓝色按钮，<br>开始说话");
 }
 // 把识别结果拼成一句（iPhone 有时会把前面的话重复带上，这里去掉重复）
 function joinResults(results){
@@ -362,7 +380,8 @@ function joinResults(results){
   if(before&&last.replace(/\s/g,"").indexOf(before.replace(/\s/g,""))===0)return last.trim();
   return parts.join("").trim();
 }
-function start(retry){
+// quiet：自动接着听时，不清掉屏幕上的上一句
+function start(retry,quiet){
   if(!SR){hint("这个浏览器不能听写。<br>请用 iPhone 的 Safari 打开");return}
   killRec();
   var me=new SR();rec=me;me.lang="zh-CN";me.interimResults=true;me.continuous=true;
@@ -371,30 +390,34 @@ function start(retry){
     if(rec!==me||done)return;
     events++;
     var t=joinResults(e.results);
-    if(t){heard=t;show(t,{interim:true})}
+    if(t){heard=t;show(t,{interim:true});wrongBtn.hidden=true}
     clearTimeout(silTimer);silTimer=setTimeout(endNow,1500);
   };
   me.onerror=function(e){
     if(rec!==me)return;
     lastErr=e.error||"error";
     if(lastErr==="not-allowed"||lastErr==="service-not-allowed"){
-      done=true;clearTimers();setListening(false);killRec();
+      autoOn=false;done=true;clearTimers();killRec();setListening(false);
       hint(standalone?"从桌面图标打开时，<br>手机不让用麦克风。<br>请改用 Safari 打开":"没有麦克风权限。<br>请看「设置」里的说明");
       rawEl.textContent="代码："+lastErr;
     }
   };
   me.onend=function(){if(rec===me)endNow()};
   try{
-    me.start();setListening(true);wrongBtn.hidden=true;show("请说……",{interim:true});keepAwake();
+    me.start();setListening(true);
+    if(!quiet){wrongBtn.hidden=true;show("请说……",{interim:true})}
+    keepAwake();
     clearTimeout(maxTimer);maxTimer=setTimeout(function(){if(rec===me&&!heard)endNow()},10000);
   }catch(err){
-    // 上一次还没完全关掉：稍等再试一次
     rec=null;
-    if(!retry){setListening(true);show("请说……",{interim:true});setTimeout(function(){start(true)},400)}
-    else{done=true;setListening(false);hint("没能开始听，<br>请再点一次");rawEl.textContent="代码："+(err&&err.name||"start")}
+    if(!retry){setTimeout(function(){if(autoOn||!quiet)start(true,quiet)},400)}
+    else{autoOn=false;done=true;setListening(false);hint("没能开始听，<br>请再点一次");rawEl.textContent="代码："+(err&&err.name||"start")}
   }
 }
-mic.addEventListener("click",function(){if(listening)endNow();else start(false)});
+mic.addEventListener("click",function(){
+  if(listening||autoOn){stopAll();return}
+  autoOn=!!settings.auto;idleSince=Date.now();start(false,false);
+});
 
 /* ---------------- 听错了 ---------------- */
 var fixEl=$("fix");
@@ -464,13 +487,14 @@ function opts(el,items,key){
 }
 function drawSet(){
   opts($("optClear"),[["10秒",10],["20秒",20],["30秒",30],["1分钟",60],["不自动消失",0]],"clear");
+  opts($("optAuto"),[["自动接着听",true],["每句点一次",false]],"auto");
   opts($("optFix"),[["打开",true],["关闭",false]],"fix");
   opts($("optRaw"),[["显示",true],["不显示",false]],"raw");
 }
 var resetArmed=false;
 $("resetAll").onclick=function(){
   if(!resetArmed){resetArmed=true;$("resetMsg").textContent="再点一次确认。常用语和纠错本会恢复成最初的样子。";return}
-  phrases=DEFAULT_PHRASES.slice();rules=DEFAULT_RULES.slice();settings={clear:20,fix:true,raw:true};
+  phrases=DEFAULT_PHRASES.slice();rules=DEFAULT_RULES.slice();settings={clear:20,fix:true,raw:true,auto:true};
   save("phrases",phrases);save("rules",rules);save("settings",settings);pyCache={};resetArmed=false;
   $("resetMsg").textContent="已恢复。";drawSet();
 };
