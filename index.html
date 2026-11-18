@@ -345,9 +345,15 @@ function clearTimers(){clearTimeout(silTimer);clearTimeout(maxTimer);silTimer=ma
 // 一句话结束：停顿 1.5 秒，或者点按钮
 function endNow(){
   if(done)return;done=true;clearTimers();setListening(false);
-  try{rec.stop()}catch(e){}
+  killRec();
   if(heard)finish(heard);
   else{hint("没听清，<br>请再说一次");rawEl.textContent="代码："+(lastErr||"没有结果")+" · "+events}
+}
+// 彻底关掉上一次听写，并且不再理会它迟到的通知
+function killRec(){
+  var r=rec;rec=null;if(!r)return;
+  r.onresult=r.onerror=r.onend=r.onstart=null;
+  try{r.abort()}catch(e){try{r.stop()}catch(e2){}}
 }
 // 把识别结果拼成一句（iPhone 有时会把前面的话重复带上，这里去掉重复）
 function joinResults(results){
@@ -356,31 +362,39 @@ function joinResults(results){
   if(before&&last.replace(/\s/g,"").indexOf(before.replace(/\s/g,""))===0)return last.trim();
   return parts.join("").trim();
 }
-function start(){
+function start(retry){
   if(!SR){hint("这个浏览器不能听写。<br>请用 iPhone 的 Safari 打开");return}
-  rec=new SR();rec.lang="zh-CN";rec.interimResults=true;rec.continuous=true;
+  killRec();
+  var me=new SR();rec=me;me.lang="zh-CN";me.interimResults=true;me.continuous=true;
   heard="";done=false;lastErr="";events=0;
-  rec.onresult=function(e){
+  me.onresult=function(e){
+    if(rec!==me||done)return;
     events++;
     var t=joinResults(e.results);
     if(t){heard=t;show(t,{interim:true})}
     clearTimeout(silTimer);silTimer=setTimeout(endNow,1500);
   };
-  rec.onerror=function(e){
+  me.onerror=function(e){
+    if(rec!==me)return;
     lastErr=e.error||"error";
     if(lastErr==="not-allowed"||lastErr==="service-not-allowed"){
-      done=true;clearTimers();setListening(false);
+      done=true;clearTimers();setListening(false);killRec();
       hint(standalone?"从桌面图标打开时，<br>手机不让用麦克风。<br>请改用 Safari 打开":"没有麦克风权限。<br>请看「设置」里的说明");
       rawEl.textContent="代码："+lastErr;
     }
   };
-  rec.onend=function(){endNow()};
+  me.onend=function(){if(rec===me)endNow()};
   try{
-    rec.start();setListening(true);wrongBtn.hidden=true;show("请说……",{interim:true});keepAwake();
-    maxTimer=setTimeout(function(){if(!heard)endNow()},10000);
-  }catch(err){done=true;setListening(false);hint("没能开始听，<br>请再点一次");rawEl.textContent="代码："+(err&&err.name||"start")}
+    me.start();setListening(true);wrongBtn.hidden=true;show("请说……",{interim:true});keepAwake();
+    clearTimeout(maxTimer);maxTimer=setTimeout(function(){if(rec===me&&!heard)endNow()},10000);
+  }catch(err){
+    // 上一次还没完全关掉：稍等再试一次
+    rec=null;
+    if(!retry){setListening(true);show("请说……",{interim:true});setTimeout(function(){start(true)},400)}
+    else{done=true;setListening(false);hint("没能开始听，<br>请再点一次");rawEl.textContent="代码："+(err&&err.name||"start")}
+  }
 }
-mic.addEventListener("click",function(){if(listening)endNow();else start()});
+mic.addEventListener("click",function(){if(listening)endNow();else start(false)});
 
 /* ---------------- 听错了 ---------------- */
 var fixEl=$("fix");
