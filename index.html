@@ -364,7 +364,7 @@ function setBtn(){var red=(wantOn||running)&&!paused;mic.classList.toggle("liste
 function idleHint(){if(words.classList.contains("hint"))hint(IDLE())}
 function IDLE(){return settings.mode==="hold"?"按住蓝色按钮<br>说话":"点蓝色按钮，<br>开始说话"}
 function keepAwake(){try{if(navigator.wakeLock)navigator.wakeLock.request("screen").catch(function(){})}catch(e){}}
-var VERSION="版本8";
+var VERSION="版本9";
 function dbgText(){return VERSION+" · 代码："+(dbg.err||"无")+" · 开"+dbg.start+" · 结果"+dbg.res+" · 停"+dbg.end}
 function dbgShow(){var d=$("dbg");if(d)d.textContent=dbgText()}
 setInterval(dbgShow,500);
@@ -420,7 +420,7 @@ function makeRec(){
     commit();
     if(wantOn){ // 手机自己停了：试着接着听
       setTimeout(function(){if(!wantOn||running)return;
-        try{rec.start()}catch(err){wantOn=false;setBtn();hint("听写停了，<br>点按钮继续");rawEl.textContent=dbgText()}},250);
+        freshStart(function(){wantOn=false;setBtn();stuck()})},250);
     }else{
       setBtn();
       if(words.classList.contains("interim")&&!lastRaw){hint("没听清，<br>请再说一次");rawEl.textContent=dbgText()}
@@ -437,7 +437,7 @@ function resumeListen(){
   clearTimeout(pauseTimer);paused=false;consumed=lastFull;heard="";
   if(!running&&!wantOn){startListen();return}
   wantOn=true;setBtn();resetIdle();keepAwake();
-  if(!running){try{rec.start()}catch(e){startListen()}}
+  if(!running)freshStart(function(){wantOn=false;setBtn();stuck()});
 }
 function startListen(){
   paused=false;clearTimeout(pauseTimer);
@@ -445,14 +445,20 @@ function startListen(){
   wantOn=true;heard="";lastRaw="";setBtn();keepAwake();resetIdle();
   show("请说……",{interim:true});wrongBtn.hidden=true;
   if(running)return; // 还没完全停：停下后会自动接着听
-  if(!rec)rec=makeRec();
-  try{rec.start()}
-  catch(err){ // 旧的用不了：换一个新的再试
-    dbg.err=(err&&err.name)||"start";
-    try{rec.onresult=rec.onerror=rec.onend=rec.onstart=null}catch(e){}
-    rec=makeRec();
-    try{rec.start()}catch(err2){wantOn=false;setBtn();hint("没能开始听，<br>请再点一次");rawEl.textContent=dbgText()}
-  }
+  freshStart(function(){wantOn=false;setBtn();stuck()});
+}
+// 每次重新打开都用一个全新的听写（iPhone 上旧的停过就不灵）
+function freshStart(onFail){
+  if(rec){try{rec.onresult=rec.onerror=rec.onend=rec.onstart=null;rec.abort()}catch(e){}}
+  rec=makeRec();
+  try{rec.start()}catch(err){dbg.err=(err&&err.name)||"start";onFail&&onFail()}
+}
+// 卡住了：给一个重新载入的大按钮
+function stuck(){
+  words.className="hint";words.style.opacity=1;stopClear();wrongBtn.hidden=true;
+  words.innerHTML='<div>手机听写卡住了<br><button id="reloadBtn" class="btn" style="font-size:26px;padding:16px 28px;margin-top:16px">点这里重新载入</button></div>';
+  $("reloadBtn").onclick=function(e){e.stopPropagation();location.reload()};
+  rawEl.textContent=dbgText();
 }
 function stopListen(){
   paused=false;clearTimeout(pauseTimer);
@@ -462,11 +468,12 @@ function stopListen(){
   if(words.classList.contains("interim"))hint(IDLE());
 }
 /* 按住说话 */
-var holdRelease=null;
+var holdRelease=null,holdT0=0,holdRes0=0,stalls=0;
 function holdDown(e){
   if(settings.mode!=="hold")return;
   if(e&&e.cancelable)e.preventDefault();
   clearTimeout(holdRelease);holdRelease=null;
+  holdT0=Date.now();holdRes0=dbg.res;
   if(paused)resumeListen();else if(!(wantOn||running))startListen();
   mic.classList.add("listening");micText.textContent="正在听…松开结束";
 }
@@ -476,7 +483,12 @@ function holdUp(e){
   if(holdRelease||paused)return;
   micText.textContent="……";
   // 多等一会儿，免得最后几个字被截掉
-  holdRelease=setTimeout(function(){holdRelease=null;pauseListen();
+  var held=Date.now()-holdT0;
+  holdRelease=setTimeout(function(){holdRelease=null;
+    var got=dbg.res>holdRes0;pauseListen();
+    if(!got&&held>2000){stalls++;if(stalls>=2){stalls=0;stuck();return}
+      hint("没收到声音，<br>请按住再说一次");rawEl.textContent=dbgText();return}
+    if(got)stalls=0;
     if(words.classList.contains("interim"))hint(IDLE())},800);
 }
 mic.addEventListener("pointerdown",holdDown);
